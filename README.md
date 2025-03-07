@@ -12,6 +12,6 @@ To run script `01`, the following raw data files are needed:
 + __Geospatial Data__: Shapefiles from [GADM](https://gadm.org/). This study used GADM v3.6, downloaded on _2024-10-03_.
 
 ## Contact
-For questions or collaboration inquiries, please contact:
-__Sara Lindersson__
+For questions or collaboration inquiries, please contact:  
+__Sara Lindersson__  
 Email: _sara.lindersson[at]geo.uu.se_
