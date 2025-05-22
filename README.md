@@ -1,6 +1,6 @@
 # Replication Code for "Unpacking and navigating complexity in disaster risk reduction"
 This repository contains replication code for the article:
-__Lindersson et al. (2025).__ _Unpacking and Navigating Complexity in Disaster Risk Reduction._ In-press.
+__Lindersson et al. (2025).__ _Unpacking and Navigating Complexity in Disaster Risk Reduction._ Manuscript in review.
 
 ## Repository Overview
 This repository includes R notebooks for generating the statistical analysis and figures presented in the article. To enhance readability, corresponding markdown files (`.md`) are provided as well.
