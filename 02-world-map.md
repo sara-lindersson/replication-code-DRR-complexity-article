@@ -1,0 +1,238 @@
+Figure 1, panel a and b
+================
+Sara Lindersson
+2025-05-22
+
+Script 2 of 3 in the replication code for Lindersson et al. (2025).
+
+This script creates and exports the raw versions of panel a and b of
+Figure 1.
+
+``` r
+library(here)
+library(tidyverse)
+library(countrycode)
+library(sf)
+library(rmapshaper)
+library(units)
+library(nngeo)
+library(stringi)
+library(purrr)
+library(ggplot2)
+library(tidyquant)
+library(bbplot)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(RColorBrewer)
+library(ggrepel)
+library(viridis)
+library(ggsci)
+library(cowplot)
+library(tibble)
+```
+
+### Import data and define plot settings
+
+``` r
+# Load df
+df <- readRDS("source_data.rds") %>%
+  # Jitter to avoid spatial overlaps
+  st_jitter(0.4)
+
+# Load basemap from Natural Earth
+world <- ne_countries(scale = "medium", returnclass = "sf") %>%
+  filter(name != "Antarctica")
+
+# Plotting parameters
+plot_params <- tibble(
+  crs = 8857, # Equal Earth Projection. Alternatives: Mollweide "+proj=moll", Robinson "+proj=robin"
+  landmass_color = "#e0e0e0",
+  gridline_color = "#B2C1C9",
+  box_color = "#638696",
+  label_color = "black",
+  rectangle_color = "black", # Color of rectangle indicating inset location
+  legend_position = "bottom",
+  point_size = 2.5, # Size points on map
+  alpha_point_fill = 0.7, # Transparency fill color points
+  alpha_point_stroke = 1, # Transparency stroke color points
+  lwd_point_stroke = 0.7, # Thickness stroke points
+  size_rectangle = 1, # Thickness of rectangle
+  label_size = 4, # Text size of labels
+  box_padding = 0.05, # Padding around labels
+  point_padding = 0.05, # Padding between label and point
+  max_overlaps = 100, # Max overlaps to resolve
+  segment_color = "gray", # Color of connecting lines
+  segment_size = 0.3, # Thickness of lines
+  height_inset = 0.25 # Height of inset map
+)
+
+# Qualitative color scale
+manual_colors <- c("#DC8A5E","#FECC5B","#A8CADB","#16617B","#EA5559")
+
+# Lat lon limits for inset map
+limits_box <- c(xmin = -7, xmax = 22, ymin = 50, ymax = 68)
+```
+
+### Plot pre-processing
+
+``` r
+# Transform projections
+world <- st_transform(world, crs = st_crs(plot_params$crs))
+df <- st_transform(df, crs = st_crs(plot_params$crs))
+
+# Create bounding box as an sf object using the original lat/lon CRS (WGS84)
+bbox <- st_bbox(c(xmin = limits_box[["xmin"]], xmax = limits_box[["xmax"]],
+                  ymin = limits_box[["ymin"]], ymax = limits_box[["ymax"]]),
+                crs = st_crs(4326)) %>%
+  st_as_sfc()
+
+# Transform bounding box
+bbox <- st_transform(bbox, crs = st_crs(plot_params$crs))
+
+# Extract limits from bbox
+bbox_limits <- st_bbox(bbox)
+
+# Calculate the width and height for inset map
+width_limits <- bbox_limits[["xmax"]] - bbox_limits[["xmin"]]
+height_limits <- bbox_limits[["ymax"]] - bbox_limits[["ymin"]]
+
+# Separate points into those outside the bounding box
+df_outside <- df[!st_intersects(df, bbox, sparse = FALSE), ]
+```
+
+### Create Panel A (world map)
+
+``` r
+# Create main map
+main_map <- ggplot() +
+  geom_sf(data = world, color = NA, fill = plot_params$landmass_color) +
+  
+  geom_sf(data = df, aes(color = hazard_group), size = plot_params$point_size,
+          alpha = plot_params$alpha_point_fill, shape = 16) +
+  
+  geom_sf(data = df, aes(color = hazard_group), fill = NA, size = plot_params$point_size,
+          alpha = plot_params$alpha_point_stroke,lwd = plot_params$lwd_point_stroke, shape = 1) +
+  
+  scale_color_manual(values = manual_colors) +
+  
+  geom_sf(data = bbox, color = plot_params$rectangle_color, fill = NA,
+          size = plot_params$size_rectangle, linetype = "solid") +
+  
+  geom_text_repel(
+    data = df_outside, aes(label = case_id, geometry = geometry), stat = "sf_coordinates",
+    size = plot_params$label_size, color = plot_params$label_color,
+    box.padding = plot_params$box_padding, point.padding = plot_params$point_padding,
+    max.overlaps = plot_params$max_overlaps, segment.color = plot_params$segment_color,
+    segment.size = plot_params$segment_size
+  ) +
+  
+  cowplot::theme_map() +
+  theme(
+    panel.grid.major = element_line(color = "transparent"),  
+    legend.position = plot_params$legend_position
+  ) + 
+  guides(
+    color = guide_legend(title = NULL, nrow = 2)
+  ) +
+  cowplot::panel_border(remove = TRUE)
+
+# Create inset map
+inset_map <- ggplot() +
+  geom_sf(data = world, fill = plot_params$landmass_color, color = NA) +
+  
+  geom_sf(data = df, aes(color = hazard_group), size = plot_params$point_size, alpha = plot_params$alpha_point_fill) +
+  
+  geom_sf(data = df, aes(color = hazard_group), fill = NA, size = plot_params$point_size,
+          alpha = plot_params$alpha_point_stroke, lwd = plot_params$lwd_point_stroke, shape = 1) +
+  
+  geom_text_repel(data = df, aes(label = case_id, geometry = geometry), 
+                  stat = "sf_coordinates", size = plot_params$label_size, color = plot_params$label_color, 
+                  box.padding = plot_params$box_padding, point.padding = plot_params$point_padding,
+                  max.overlaps = plot_params$max_overlaps, segment.color = plot_params$segment_color,
+                  segment.size = plot_params$segment_size) +
+  
+  scale_color_manual(values = manual_colors) +
+  
+  coord_sf(xlim = c(bbox_limits[["xmin"]], bbox_limits[["xmax"]]),
+           ylim = c(bbox_limits[["ymin"]], bbox_limits[["ymax"]]),
+           expand = FALSE) +
+  
+  theme_void() +
+  theme(legend.position = "none")
+
+# Combine into Panel A
+panel_a <- ggdraw() +
+  draw_plot(main_map) +
+  draw_plot(inset_map, x = 0, y = 0.2, height = plot_params$height_inset,
+            # Calculate width for correct aspect ratio
+            width = ((width_limits / height_limits) * plot_params$height_inset))
+
+# Export Panel A
+finalise_plot(plot_name = panel_a,
+              save_filepath = here("output","figures","1a_world_map.pdf"),
+              source_name = "Projection Equal Earth",
+              width_pixels = 800, height_pixels = 500)
+```
+
+### Create Panel B
+
+``` r
+df_long <- df %>%
+  pivot_longer(cols = c(uncertainty, interdependency, multi_levels, volatility, overlaps),
+               names_to = "variable",
+               values_to = "value")
+
+facet_titles <- c(interdependency = "System interdependency", 
+                  uncertainty = "Uncertainty in data",
+                  multi_levels = "Multi-level governance",
+                  volatility = "Political volatility",
+                  overlaps = "Functional overlap")
+
+panel_b <- 
+  ggplot(df_long, aes(x = as.factor(case_id), y = value, fill = hazard_group)) + 
+  
+  geom_segment(aes(x = as.factor(case_id), 
+                   xend = as.factor(case_id), 
+                   y = 1,
+                   yend = value 
+  ), 
+  color = plot_params$landmass_color,
+  linewidth = 0.75, show.legend = FALSE) +
+  
+  geom_point(data = df_long,
+             aes(x = as.factor(case_id), y = value),
+             color = "white", size = 5, shape = 16, show.legend = FALSE) +
+  
+  geom_point(data = df_long,
+             aes(x = as.factor(case_id), y = value, color = hazard_group), 
+             size = 3, shape = 16, alpha = plot_params$alpha_point_fill, show.legend = FALSE) + 
+  
+  geom_point(data = df_long,
+             aes(x = as.factor(case_id), y = value, color = hazard_group), 
+             size = 3, shape = 1,
+             alpha = plot_params$alpha_point_stroke, show.legend = FALSE) + 
+  
+  facet_wrap(~ variable, ncol = 1, scales = "free_y",
+             labeller = as_labeller(facet_titles)) + 
+  
+  scale_fill_manual(values = manual_colors) +
+  scale_color_manual(values = manual_colors) +
+  labs(x = NULL, y = NULL) +
+  scale_y_continuous(breaks = c(1, 2, 3, 4, 5), limits = c(0.5, 5.5)) +
+  theme_minimal_grid() +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    axis.ticks = element_line(linewidth = 0.2, color = plot_params$gridline_color),
+    axis.text.x = element_text(size = 8),  
+    axis.text.y = element_text(size = 8),
+    strip.text = element_text(size = 8, hjust = 0, face = "bold"),
+    panel.border = element_rect(color = plot_params$box_color, fill = NA, linewidth = 0.5)
+  ) 
+
+finalise_plot(plot_name = panel_b,
+              save_filepath = here("output","figures", "1b_dot_plot.pdf"),
+              source_name = NA, width_pixels = 800, height_pixels = 400)
+```

@@ -1,0 +1,237 @@
+Data tidy
+================
+Sara Lindersson
+2025-05-22
+
+Script 1 of 3 in the replication code for Lindersson et al. (2025).
+
+The script pre-processes the collection of case studies by tidying the
+dataframe and identifying the coordinates of each case study using
+administrative unit IDs (`gid`) from [GADM
+v3.6](https://gadm.org/download_world36.html). The script also performs
+outlier analysis.
+
+The output from this script are the `source_data`: one csv-file and one
+R dataframe.
+
+``` r
+library(here)
+library(tidyverse)
+library(countrycode)
+library(sf)
+library(nngeo)
+library(stringi)
+library(purrr)
+library(ggplot2)
+library(tibble)
+library(knitr)
+```
+
+### Define parameters
+
+``` r
+table_file <- here("raw-data", "initial-sample.csv")
+
+gadm_dir <- here("raw-data", "gadm", "v36", "shp")
+
+highlight_cases <- c("Flood mapping in the Po river basin (Italy)",
+                     "Volcanic Ash Cloud (EU) 2010, 2011",
+                     "Ebola epidemic (West Africa), 2014",
+                     "Hurricane Sandy in New York City 2012",
+                     "Disaster risk management in Mozambique")
+
+columns <- c('uncertainty','interdependency','multi_levels','volatility','overlaps')
+```
+
+### Load and tidy data
+
+``` r
+df <- read.csv(
+  table_file,
+  header = TRUE,
+  na.strings = c("NA", "")
+) %>%
+  
+  # Convert all column names to lowercase
+  rename_with(tolower) %>%
+  
+  # Filter cases
+  filter(include_in_sample == TRUE) %>%
+  
+  # Standard-Deviation based approach to identify outlier responses
+  rowwise() %>%
+  mutate(response_mean = mean(c_across(columns), na.rm = T)) %>%
+  ungroup
+
+# Compute dataset-level mean and SD
+stats <- df %>%
+  summarise(
+    mean_overall = mean(response_mean, na.rm = T),
+    sd_overall = sd(response_mean, na.rm = T)
+  )
+
+# Flag responses with mean > 2 SD from overall mean
+df <- df %>%
+  mutate(is_outlier = abs(response_mean - stats$mean_overall) > 2 * stats$sd_overall)
+
+# Print outlier
+print(paste("The identified outlier is case:" , df$case_study[df$is_outlier]))
+
+df <- df %>%
+  # Exclude outlier to retrieve final sample
+  filter(!is_outlier) %>%
+  
+  # Drop temporary columns
+  select(-response_mean,
+         -is_outlier,
+         -include_in_sample,
+         -exclusion_comment,
+         -others
+  ) %>%
+  
+  # Identify highlighted cases
+  mutate(
+    case_study = str_trim(case_study), # Remove leading or trailing white spaces
+    highlight = case_when(
+      case_study %in% highlight_cases ~ TRUE,
+      TRUE ~ FALSE)
+  ) %>%
+  
+  # Determine GID level and assign the corresponding GID
+  mutate(
+    level = case_when(
+      !is.na(gid_3) ~ 3,
+      !is.na(gid_2) ~ 2,
+      !is.na(gid_1) ~ 1,
+      !is.na(gid_0) ~ 0,
+      TRUE ~ NA_real_
+    ),
+    gid = coalesce(gid_3, gid_2, gid_1, gid_0),
+  ) %>%
+  
+  # Define hazard groups for plotting
+  mutate(
+    hazard_group = factor(
+      case_when(
+        hazard == "drought" | hazard == "wildfire" ~ "Drought or wildfire",
+        hazard == "volcanic activity" | hazard == "earthquake" ~ "Earthquake or volcanic activity",
+        hazard == "epidemic" ~ "Epidemic",
+        hazard == "flood" | hazard == "storm" ~ "Flood or storm",
+        hazard == "multi-hazard" ~ "Multi-hazard"
+      ), ordered = TRUE
+    )
+  ) %>%
+  
+  # Also convert hazard and spatial level variables to factor
+  mutate(
+    hazard = factor(hazard, levels = c("drought", "wildfire", "earthquake",
+                                       "volcanic activity", "epidemic", "flood",
+                                       "storm", "multi-hazard")),
+    case_spatial_level = factor(case_spatial_level)
+  ) %>%
+  
+  # Convert complexity scores to integers
+  mutate(
+    across(c(uncertainty, interdependency, multi_levels, volatility, overlaps), as.integer),
+  ) %>%
+  # Calculate summary statistics across the complexity scores 
+  mutate(
+    score_median = pmap_dbl(list(uncertainty, interdependency, multi_levels, volatility, overlaps), ~ median(c(...))),
+    score_mean = pmap_dbl(list(uncertainty, interdependency, multi_levels, volatility, overlaps), ~ mean(c(...))),
+    score_sum = pmap_dbl(list(uncertainty, interdependency, multi_levels, volatility, overlaps), ~ sum(c(...)))
+  ) %>%
+  
+  # Arrange order of dataframe
+  arrange(
+    hazard_group,
+    desc(interdependency),
+    desc(multi_levels),
+    desc(overlaps),
+    desc(uncertainty),
+    desc(volatility)
+  ) %>%
+  
+  # Assign case id's
+  mutate(
+    case_id = row_number()
+  ) %>%
+  relocate(case_id)
+
+# Create vector of unique gid's in sample
+gids <- df %>%
+  select(gid) %>%
+  separate_rows(gid, sep = ";") %>%
+  mutate(gid = str_trim(gid)) %>%
+  distinct(gid) %>%
+  pull(gid)
+```
+
+### Identify centroids
+
+``` r
+# Define a function to import and process GADM polygons based on level
+import_gadm <- function(level, gids) {
+  st_read(dsn = gadm_dir,
+          paste0('gadm36_', level)) %>%
+    rename_all(str_to_lower) %>%
+    select(gid = paste0('gid_', level)) %>%
+    filter(gid %in% gids)
+}
+
+# List of administrative levels
+levels <- min(df$level):max(df$level)
+
+# Import and combine GADM polygons for all levels
+gadm <- map_dfr(levels, ~ import_gadm(.x, gids))
+
+# Separate multiple adm unit IDs
+df_expanded <- df %>%
+  separate_rows(gid, sep = ";\\s*") %>%
+  left_join(gadm, by = "gid")
+
+# Union the polygons for rows with the same case study, find centroids
+df_union <- df_expanded %>%
+  group_by(case_study) %>%
+  summarize(geometry = st_union(geometry), .groups = "drop") %>%
+  mutate(centroid = st_centroid(geometry)) %>%
+  select(case_study, centroid)
+
+# Join the unioned centroids back to the original dataframe
+df <- df %>%
+  left_join(df_union, by = "case_study") %>%
+  rename(geometry = centroid) %>%
+  st_as_sf()
+
+# Identify the continent
+df <- df %>%
+  mutate(
+    iso3c = substr(gid, 1, 3),
+    iso3c = case_when(
+      # Replace the code for Northern Cyprus 
+      iso3c == "XNC" ~ "CYP",
+      TRUE ~ iso3c
+    ),
+    continent = countrycode(iso3c, origin = "iso3c", destination = "continent")
+  )
+
+# Drop redundant columns
+df <- df %>%
+  select(
+    -location_note_for_geocoding,
+    -gid_0, -gid_1, -gid_2, -gid_3,
+    -level,
+    -gid
+  )
+
+# Save df
+saveRDS(df, file = "source_data.rds")
+
+# Adjust df for saving as csv
+df_csv <- df %>%
+  mutate(lon = round(st_coordinates(geometry)[, 1], digits = 4),
+         lat = round(st_coordinates(geometry)[, 2], digits = 4)) %>%
+  as.data.frame() %>%
+  select(-geometry, -reference_url, reference_url)
+
+write.csv(df_csv, file = "source_data.csv", row.names = FALSE)
+```
