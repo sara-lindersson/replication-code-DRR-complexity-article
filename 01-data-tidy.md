@@ -3,7 +3,7 @@ Data tidy
 Sara Lindersson
 2025-05-26
 
-Script 1 of 3 in the replication code for Lindersson et al. (2025).
+Script 1 of 3 in the replication code for Lindersson et al. Complexity article.
 
 The script pre-processes the collection of case studies by tidying the
 dataframe and identifying the coordinates of each case study using
