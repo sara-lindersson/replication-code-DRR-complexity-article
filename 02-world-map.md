@@ -3,7 +3,7 @@ Figure 1, panel a and b
 Sara Lindersson
 2025-05-22
 
-Script 2 of 3 in the replication code for Lindersson et al. (2025).
+Script 2 of 3 in the replication code for Lindersson et al. Complexity article.
 
 This script creates and exports the raw versions of panel a and b of
 Figure 1.
