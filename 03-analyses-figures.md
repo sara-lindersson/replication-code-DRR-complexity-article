@@ -3,7 +3,7 @@ Remaining analyses (figures and statistical tests)
 Sara Lindersson
 2025-05-22
 
-Script 3 of 3 in the replication code for Lindersson et al. (2025).
+Script 3 of 3 in the replication code for Lindersson et al. Complexity article.
 
 This script performs the statistical analysis and exports the raw
 versions of the article figures (except panel a and b of Figure 1).
